@@ -32,13 +32,17 @@ class SubscriberMethodFinder {
      * In newer class files, compilers may add methods. Those are called bridge or synthetic methods.
      * EventBus must ignore both. There modifiers are not public but defined in the Java class file format:
      * http://docs.oracle.com/javase/specs/jvms/se7/html/jvms-4.html#jvms-4.6-200-A.1
+     * 在较新的类文件，编译器可能会添加方法。那些被称为BRIDGE或SYNTHETIC方法。
+     * EventBus必须忽略两者。有修饰符没有公开，但在Java类文件中有格式定义
      */
     private static final int BRIDGE = 0x40;
     private static final int SYNTHETIC = 0x1000;
 
+    //需要忽略的修饰符
     private static final int MODIFIERS_IGNORE = Modifier.ABSTRACT | Modifier.STATIC | BRIDGE | SYNTHETIC;
+    //key：类名，value：该类中需要要响应的方法集合
     private static final Map<Class<?>, List<SubscriberMethod>> methodCache = new HashMap<Class<?>, List<SubscriberMethod>>();
-
+    //跳过校验方法的类（即通过构造函数传入的集合）
     private final Map<Class<?>, Class<?>> skipMethodVerificationForClasses;
 
     SubscriberMethodFinder(List<Class<?>> skipMethodVerificationForClassesList) {
@@ -60,6 +64,7 @@ class SubscriberMethodFinder {
         }
         subscriberMethods = new ArrayList<SubscriberMethod>();
         Class<?> clazz = subscriberClass;
+
         HashMap<String, Class> eventTypesFound = new HashMap<String, Class>();
         StringBuilder methodKeyBuilder = new StringBuilder();
         while (clazz != null) {
@@ -72,6 +77,7 @@ class SubscriberMethodFinder {
             // Starting with EventBus 2.2 we enforced methods to be public (might change with annotations again)
             try {
                 // This is faster than getMethods, especially when subscribers a fat classes like Activities
+                //通过反射得到clazz的全部方法
                 Method[] methods = clazz.getDeclaredMethods();
 
                 filterSubscriberMethods(subscriberMethods, eventTypesFound, methodKeyBuilder, methods);
@@ -102,23 +108,27 @@ class SubscriberMethodFinder {
         for (Method method : methods) {
             String methodName = method.getName();
             if (methodName.startsWith(ON_EVENT_METHOD_NAME)) {
-                int modifiers = method.getModifiers();
+                int modifiers = method.getModifiers();//方法的修饰符
                 Class<?> methodClass = method.getDeclaringClass();
+                //如果是public，不是之前需要忽略的类型
                 if ((modifiers & Modifier.PUBLIC) != 0 && (modifiers & MODIFIERS_IGNORE) == 0) {
-                    Class<?>[] parameterTypes = method.getParameterTypes();
-                    if (parameterTypes.length == 1) {
+                    Class<?>[] parameterTypes = method.getParameterTypes();//得到方法的参数
+                    if (parameterTypes.length == 1) {//如果有一个参数
                         ThreadMode threadMode = getThreadMode(methodClass, method, methodName);
                         if (threadMode == null) {
                             continue;
                         }
-                        Class<?> eventType = parameterTypes[0];
+                        Class<?> eventType = parameterTypes[0];//响应方法的参数，也就是响应的标志
                         methodKeyBuilder.setLength(0);
                         methodKeyBuilder.append(methodName);
                         methodKeyBuilder.append('>').append(eventType.getName());
+                        //方法名>方法的参数 作为key
                         String methodKey = methodKeyBuilder.toString();
+                        //方法+参数作为key，方法所在的类
                         Class methodClassOld = eventTypesFound.put(methodKey, methodClass);
                         if (methodClassOld == null || methodClassOld.isAssignableFrom(methodClass)) {
                             // Only add if not already found in a sub class
+                            //方法名、工作在哪个线程、事件类型
                             subscriberMethods.add(new SubscriberMethod(method, threadMode, eventType));
                         } else {
                             // Revert the put, old class is further down the class hierarchy

@@ -27,12 +27,12 @@ import java.util.concurrent.Executors;
 public class EventBusBuilder {
     private final static ExecutorService DEFAULT_EXECUTOR_SERVICE = Executors.newCachedThreadPool();
 
-    boolean logSubscriberExceptions = true;
-    boolean logNoSubscriberMessages = true;
-    boolean sendSubscriberExceptionEvent = true;
-    boolean sendNoSubscriberEvent = true;
-    boolean throwSubscriberException;
-    boolean eventInheritance = true;
+    boolean logSubscriberExceptions = true;//监听异常日志
+    boolean logNoSubscriberMessages = true;//如果没有订阅者，显示一个Log
+    boolean sendSubscriberExceptionEvent = true;//发送监听到的异常事件
+    boolean sendNoSubscriberEvent = true;//如果没有订阅者，发送一条默认事件
+    boolean throwSubscriberException;//如果失败抛出异常
+    boolean eventInheritance = true;//event的子类是否也能相应订阅者
     ExecutorService executorService = DEFAULT_EXECUTOR_SERVICE;
     List<Class<?>> skipMethodVerificationForClasses;
 
@@ -128,7 +128,7 @@ public class EventBusBuilder {
         }
     }
 
-    /** Builds an EventBus based on the current configuration. */
+    /** Builds an EventBus based on the current configuration. 根据现在的配置创建对象*/
     public EventBus build() {
         return new EventBus(this);
     }

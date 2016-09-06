@@ -22,7 +22,7 @@ import android.os.SystemClock;
 
 final class HandlerPoster extends Handler {
 
-    private final PendingPostQueue queue;
+    private final PendingPostQueue queue; //发送任务队列
     private final int maxMillisInsideHandleMessage;
     private final EventBus eventBus;
     private boolean handlerActive;
@@ -34,13 +34,21 @@ final class HandlerPoster extends Handler {
         queue = new PendingPostQueue();
     }
 
+    /**
+     * 入队
+     * 入队方法会根据参数创建 待发送对象 pendingPost 并加入队列,
+     * 如果此时 handleMessage() 没有在运行中,则发送一条空消息让 handleMessage
+     * @param subscription 订阅者
+     * @param event 订阅事件
+     */
     void enqueue(Subscription subscription, Object event) {
+        //从复用池中获取一个pendingPost
         PendingPost pendingPost = PendingPost.obtainPendingPost(subscription, event);
         synchronized (this) {
-            queue.enqueue(pendingPost);
-            if (!handlerActive) {
+            queue.enqueue(pendingPost);//加入队列
+            if (!handlerActive) { //handler是否在运行
                 handlerActive = true;
-                if (!sendMessage(obtainMessage())) {
+                if (!sendMessage(obtainMessage())) {//发送一条空消息
                     throw new EventBusException("Could not send handler message");
                 }
             }
@@ -49,7 +57,7 @@ final class HandlerPoster extends Handler {
 
     @Override
     public void handleMessage(Message msg) {
-        boolean rescheduled = false;
+        boolean rescheduled = false; //用于修改handlerActive
         try {
             long started = SystemClock.uptimeMillis();
             while (true) {
@@ -57,15 +65,17 @@ final class HandlerPoster extends Handler {
                 if (pendingPost == null) {
                     synchronized (this) {
                         // Check again, this time in synchronized
-                        pendingPost = queue.poll();
+                        pendingPost = queue.poll();//出队
                         if (pendingPost == null) {
                             handlerActive = false;
                             return;
                         }
                     }
                 }
+                //如果订阅者没有取消注册。则分发消息
                 eventBus.invokeSubscriber(pendingPost);
-                long timeInMethod = SystemClock.uptimeMillis() - started;
+                long timeInMethod = SystemClock.uptimeMillis() - started;//发送的时间
+
                 if (timeInMethod >= maxMillisInsideHandleMessage) {
                     if (!sendMessage(obtainMessage())) {
                         throw new EventBusException("Could not send handler message");

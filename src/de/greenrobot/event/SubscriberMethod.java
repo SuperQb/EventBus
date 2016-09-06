@@ -21,9 +21,9 @@ import java.lang.reflect.Method;
  * 订阅者事件响应函数信息
  */
 final class SubscriberMethod {
-    final Method method;//响应方法
-    final ThreadMode threadMode;
-    final Class<?> eventType;//事件类型，指事件所属的Class
+    final Method method;//响应方法，方法名
+    final ThreadMode threadMode;//工作在哪个线程
+    final Class<?> eventType;//事件类型，方法的参数
     /** Used for efficient comparison */
     String methodString;
 
@@ -46,6 +46,7 @@ final class SubscriberMethod {
         }
     }
 
+    //设置methodString的值
     private synchronized void checkMethodString() {
         if (methodString == null) {
             // Method.toString has more overhead, just take relevant parts of the method

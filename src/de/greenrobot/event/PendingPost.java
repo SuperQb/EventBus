@@ -19,17 +19,24 @@ import java.util.ArrayList;
 import java.util.List;
 
 final class PendingPost {
+    //单例池，复用对象
     private final static List<PendingPost> pendingPostPool = new ArrayList<PendingPost>();
 
-    Object event;
-    Subscription subscription;
-    PendingPost next;
+    Object event; //事件类型，订阅时间
+    Subscription subscription;//订阅者
+    PendingPost next;//队列下一个待发送对象
 
     private PendingPost(Object event, Subscription subscription) {
         this.event = event;
         this.subscription = subscription;
     }
 
+    /**
+     * 首先检查复用池中是否有可用，如果有则返回，否则返回一个新的
+     * @param subscription 订阅者
+     * @param event 订阅事件
+     * @return 待发送对象
+     */
     static PendingPost obtainPendingPost(Subscription subscription, Object event) {
         synchronized (pendingPostPool) {
             int size = pendingPostPool.size();
@@ -44,12 +51,17 @@ final class PendingPost {
         return new PendingPost(event, subscription);
     }
 
+    /**
+     * 回收一个待发送对象，并加入复用池
+     * @param pendingPost
+     */
     static void releasePendingPost(PendingPost pendingPost) {
         pendingPost.event = null;
         pendingPost.subscription = null;
         pendingPost.next = null;
         synchronized (pendingPostPool) {
             // Don't let the pool grow indefinitely
+            // 防止池无限增长
             if (pendingPostPool.size() < 10000) {
                 pendingPostPool.add(pendingPost);
             }

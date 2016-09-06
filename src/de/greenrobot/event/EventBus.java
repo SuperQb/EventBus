@@ -47,10 +47,19 @@ public class EventBus {
     private static final EventBusBuilder DEFAULT_BUILDER = new EventBusBuilder();
     private static final Map<Class<?>, List<Class<?>>> eventTypesCache = new HashMap<Class<?>, List<Class<?>>>();
 
+    //三个map
+    //key 响应时间的参数（参数类型），value 订阅这个事件所有订阅者的集合
     private final Map<Class<?>, CopyOnWriteArrayList<Subscription>> subscriptionsByEventType;
+
+    //key 订阅者 value 订阅者所订阅事件的集合
     private final Map<Object, List<Class<?>>> typesBySubscriber;
+
+    //粘性事件
     private final Map<Class<?>, Object> stickyEvents;
 
+    //ThreadLocal 是一个线程内部的数据存储类，通过它可以在指定的线程中存储数据，而这段数据是不会与其他线程共享的。
+    // 其内部原理是通过生成一个它包裹的泛型对象的数组，在不同的线程会有不同的数组索引值，
+    // 通过这样就可以做到每个线程通过 get() 方法获取的时候，取到的只能是自己线程所对应的数据。
     private final ThreadLocal<PostingThreadState> currentPostingThreadState = new ThreadLocal<PostingThreadState>() {
         @Override
         protected PostingThreadState initialValue() {
@@ -59,9 +68,10 @@ public class EventBus {
     };
 
 
-    private final HandlerPoster mainThreadPoster;
-    private final BackgroundPoster backgroundPoster;
-    private final AsyncPoster asyncPoster;
+    private final HandlerPoster mainThreadPoster;//前台发送者
+    private final BackgroundPoster backgroundPoster;//后台发送者
+    private final AsyncPoster asyncPoster;//后台发送者（只让队列第一个待订阅者去响应）
+
     private final SubscriberMethodFinder subscriberMethodFinder;
     private final ExecutorService executorService;
 
@@ -106,9 +116,11 @@ public class EventBus {
         subscriptionsByEventType = new HashMap<Class<?>, CopyOnWriteArrayList<Subscription>>();
         typesBySubscriber = new HashMap<Object, List<Class<?>>>();
         stickyEvents = new ConcurrentHashMap<Class<?>, Object>();
+
         mainThreadPoster = new HandlerPoster(this, Looper.getMainLooper(), 10);
         backgroundPoster = new BackgroundPoster(this);
         asyncPoster = new AsyncPoster(this);
+
         subscriberMethodFinder = new SubscriberMethodFinder(builder.skipMethodVerificationForClasses);
         logSubscriberExceptions = builder.logSubscriberExceptions;
         logNoSubscriberMessages = builder.logNoSubscriberMessages;
@@ -171,18 +183,24 @@ public class EventBus {
         List<SubscriberMethod> subscriberMethods = subscriberMethodFinder.findSubscriberMethods(subscriber.getClass());
         //循环每个响应函数
         for (SubscriberMethod subscriberMethod : subscriberMethods) {
-            subscribe(subscriber, subscriberMethod, sticky, priority);
+            subscribe(subscriber, subscriberMethod, sticky,priority );
         }
     }
 
     // Must be called in synchronized block
     private void subscribe(Object subscriber, SubscriberMethod subscriberMethod, boolean sticky, int priority) {
+        //从传入的响应方法中获取其中的参数（参数类型）
         Class<?> eventType = subscriberMethod.eventType;
+
+        //通过响应事件作为key，得到这个类型的响应事件的全部订阅者
+        //每一个订阅者至少会订阅一个事件，多个订阅者可能订阅同一个事件
         CopyOnWriteArrayList<Subscription> subscriptions = subscriptionsByEventType.get(eventType);
+
         Subscription newSubscription = new Subscription(subscriber, subscriberMethod, priority);
         if (subscriptions == null) {
+            //如果还没有这类的订阅者 添加一个list
             subscriptions = new CopyOnWriteArrayList<Subscription>();
-            subscriptionsByEventType.put(eventType, subscriptions);//
+            subscriptionsByEventType.put(eventType, subscriptions);
         } else {
             if (subscriptions.contains(newSubscription)) {
                 throw new EventBusException("Subscriber " + subscriber.getClass() + " already registered to event "
@@ -192,7 +210,7 @@ public class EventBus {
 
         // Starting with EventBus 2.2 we enforced methods to be public (might change with annotations again)
         // subscriberMethod.method.setAccessible(true);
-
+        // 根据优先级插入订阅者集合中
         int size = subscriptions.size();
         for (int i = 0; i <= size; i++) {
             if (i == size || newSubscription.priority > subscriptions.get(i).priority) {
@@ -201,7 +219,8 @@ public class EventBus {
             }
         }
 
-        //得到当前订阅者的所有事件队列，将此事件保存到队列typesBySubscriber中，用于后期取消订阅
+        //得到当前订阅者的所订阅的事件队列，将此事件保存到队列typesBySubscriber中，用于后期取消订阅
+        //当前订阅者订阅了哪些事件
         List<Class<?>> subscribedEvents = typesBySubscriber.get(subscriber);
         if (subscribedEvents == null) {
             subscribedEvents = new ArrayList<Class<?>>();
@@ -220,6 +239,7 @@ public class EventBus {
                 Set<Map.Entry<Class<?>, Object>> entries = stickyEvents.entrySet();
                 for (Map.Entry<Class<?>, Object> entry : entries) {
                     Class<?> candidateEventType = entry.getKey();
+                    //如果eventType是candidateEventType同一个类或是其子类
                     if (eventType.isAssignableFrom(candidateEventType)) {
                         Object stickyEvent = entry.getValue();
                         checkPostStickyEventToSubscription(newSubscription, stickyEvent);
@@ -266,8 +286,10 @@ public class EventBus {
         List<Class<?>> subscribedTypes = typesBySubscriber.get(subscriber);
         if (subscribedTypes != null) {
             for (Class<?> eventType : subscribedTypes) {
+                //取消注册subscriber对eventType的相应
                 unsubscribeByEventType(subscriber, eventType);
             }
+            //当subscriber对所有事件都不响应，移除订阅者
             typesBySubscriber.remove(subscriber);
         } else {
             Log.w(TAG, "Subscriber to unregister was not registered before: " + subscriber.getClass());
@@ -278,7 +300,7 @@ public class EventBus {
     public void post(Object event) {
         //从currentPostingThreadState得到当前线程的POST信息postingState
         PostingThreadState postingState = currentPostingThreadState.get();
-        //时间队列
+        //事件队列
         List<Object> eventQueue = postingState.eventQueue;
         //将当前事件添加到当前线程的事件队列中
         eventQueue.add(event);
@@ -408,15 +430,18 @@ public class EventBus {
         Class<?> eventClass = event.getClass();
         boolean subscriptionFound = false;
         if (eventInheritance) {//事件是否允许继承
+            //获取到eventClass所有父类集合
             List<Class<?>> eventTypes = lookupAllEventTypes(eventClass);
             int countTypes = eventTypes.size();
             for (int h = 0; h < countTypes; h++) {
                 Class<?> clazz = eventTypes.get(h);
+                //左或者右只要有一个为真则为真，并赋值给左
                 subscriptionFound |= postSingleEventForEventType(event, postingState, clazz);
             }
         } else {
             subscriptionFound = postSingleEventForEventType(event, postingState, eventClass);
         }
+
         if (!subscriptionFound) {
             if (logNoSubscriberMessages) {
                 Log.d(TAG, "No subscribers registered for event " + eventClass);
@@ -431,6 +456,7 @@ public class EventBus {
     private boolean postSingleEventForEventType(Object event, PostingThreadState postingState, Class<?> eventClass) {
         CopyOnWriteArrayList<Subscription> subscriptions;
         synchronized (this) {
+            //得到所有订阅了eventClass的事件集合
             subscriptions = subscriptionsByEventType.get(eventClass);
         }
         if (subscriptions != null && !subscriptions.isEmpty()) {
@@ -456,12 +482,16 @@ public class EventBus {
         return false;
     }
 
+
+    //响应
     private void postToSubscription(Subscription subscription, Object event, boolean isMainThread) {
-        switch (subscription.subscriberMethod.threadMode) {
+        switch (subscription.subscriberMethod.threadMode) {//方法所要运行的线程
             case PostThread:
-                invokeSubscriber(subscription, event);//直接调用事件相应的方法
+                invokeSubscriber(subscription, event);//直接调用事件响应的方法
                 break;
             case MainThread:
+                //如果是主线程就直接调用
+                //否则就使用handle在主线程相应事件
                 if (isMainThread) {
                     invokeSubscriber(subscription, event);
                 } else {
@@ -564,6 +594,7 @@ public class EventBus {
 
     /** For ThreadLocal, much faster to set (and get multiple values). */
     final static class PostingThreadState {
+        //通过post方法 参数传入的事件集合
         final List<Object> eventQueue = new ArrayList<Object>();
         boolean isPosting;
         boolean isMainThread;
